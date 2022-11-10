@@ -10,6 +10,7 @@
 
 #include "task_queue_win.h"
 #include <winsock2.h>
+#define NOMINMAX
 #include <windows.h>
 #include <sal.h>       // Must come after windows headers.
 #include <mmsystem.h>  // Must come after windows headers.
@@ -19,6 +20,7 @@
 #include <memory>
 #include <queue>
 #include <utility>
+#include <chrono>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
@@ -28,7 +30,7 @@
 #include "event.h"
 #include "platform_thread.h"
 
-#include <chrono>
+
 namespace webrtc {
 namespace {
 #define WM_QUEUE_DELAYED_TASK WM_USER + 2
@@ -52,9 +54,10 @@ rtc::ThreadPriority TaskQueuePriorityToThreadPriority(
   }
 }
 
-size_t CurrentTime() {
+int64_t CurrentTime() {
   auto duration_now = std::chrono::system_clock::now().time_since_epoch();
-  return std::chrono::duration_cast<std::chrono::milliseconds>(duration_now).count();
+  int64_t time = std::chrono::duration_cast<std::chrono::milliseconds>(duration_now).count();
+  return time;
 }
 
 class DelayedTaskInfo {
@@ -74,10 +77,10 @@ class DelayedTaskInfo {
   void Run() const {
     std::move(task_)();
   }
-  size_t due_time() const
+  int64_t due_time() const
   {
     auto duration = create_time_.time_since_epoch();
-    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+    int64_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
     return millis + delay_time_.count();
   }
 
@@ -275,9 +278,11 @@ void TaskQueueWin::ScheduleNextTimer() {
     return;
 
   const auto& next_task = timer_tasks_.top();
+  int64_t delay = next_task.due_time() - CurrentTime();
+  delay = 0 > delay ? 0 : delay;
   uint32_t milliseconds = 5000;
-  if (!timer_.StartOneShotTimer(milliseconds))
-    timer_id_ = ::SetTimer(nullptr, 0, milliseconds, nullptr);
+  if (!timer_.StartOneShotTimer(delay))
+    timer_id_ = ::SetTimer(nullptr, 0, delay, nullptr);
 }
 
 void TaskQueueWin::CancelTimers() {
